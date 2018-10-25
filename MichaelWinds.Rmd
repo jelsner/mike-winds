@@ -1,20 +1,43 @@
 ---
-output: html_document
+title: "Hurricane Michael's Windfield"
+author: "James B. Elsner"
+date: October 25, 2018
+output: 
+  html_document:
+    keep_md: true
 editor_options: 
   chunk_output_type: console
 ---
-## Hurricane Michael's wind field
 
 Load the data.
 ```{r}
 L <- "michaeldata.csv"
 MW.df <- read.csv(L, header = TRUE)
-MW.df[-33, ] # duplicate location Ballard Parners and Challenger Learning Center
+MW.df <- MW.df[-33, ] # duplicate location Ballard Parners and Challenger Learning Center remove one
 names(MW.df)
 dim(MW.df)
 ```
 
-The data frame contains 47 wind speed measurements. Longitude and latitude coordinates of the sites are given along with the peak wind gust (`PeakGustSpeed3`). Create a spatial points data frame by specifying columns that contain the spatial coordinates. Then assign a geographic coordinate system and convert the wind speed to meters per second.
+The data frame contains 47 wind speed measurements (one duplicate location, removed). Longitude and latitude coordinates of the sites are given along with the peak wind gust (`PeakGustSpeed3`). Create a spatial points data frame by specifying columns that contain the spatial coordinates. Then assign a geographic coordinate system and convert the wind speed to meters per second.
+```{r}
+library(sf)
+library(dplyr)
+X <- MW.df %>%
+  select(Longitude, Latitude)
+
+MW.sf <- st_as_sf(x = X, 
+                  coords = c("Longitude", "Latitude"),
+                  crs = "+proj=longlat +datum=WGS84")
+plot(MW.sf)
+# interactive map:
+library(mapview)
+mapview(MW.sf)
+
+# convert to sp object if needed
+my.sp.point <- as(my.sf.point, "Spatial")
+
+```
+
 ```{r}
 library(sp)
 MW.spdf <- MW.df
@@ -22,7 +45,7 @@ coordinates(MW.spdf) <- ~ Longitude + Latitude
 ll <- "+proj=longlat +datum=NAD83"
 proj4string(MW.spdf) <- CRS(ll)
 MW.spdf$gust <- MW.spdf$PeakGustSpeed3 * .51444
-summary(MW$gust)
+summary(MW.spdf$gust)
 ```
 
 Create a histogram.
@@ -51,19 +74,17 @@ tm_shape(counties_sf) +
 Next we create a character string specifying the tags for a planar projection and transform the geographic coordinates of the site locations and map polygons to the projected coordinates. Here we use Albers equal-area projection with true scale at latitudes 23 and 30$^\circ$ N and include a tag to specify meters as the unit of distance.
 ```{r}
 aea <- "+proj=aea +lat_1=23 +lat_2=30 +lat_0=26, +lon_0=-83 +units=m"
-MW.spdf <- spTransform(MW.spdf, CRS(aea))
+lcc <- "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=39 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m"
+MW.spdf <- spTransform(MW.spdf, CRS(lcc))
 ```
 
 ### Empirical variogram
 
-Rainfall is an example of geostatistical data. In principle it can be measured anywhere, but typically we have values at a sample of sites. The pattern of observation sites is not of much interest as it is a consequence of constraints (convenience, opportunity, economics, etc) unrelated to the phenomenon. Interest centers on inference about how much rain fell across the region.
-
-With the **gstat** package, the empirical variogram is computed using the `variogram()` function. The first argument is the model formula specifying the rainfall column from the data frame and the second argument is the data frame name.  Here `~ 1` in the model formula indicates no covariates or trends in the data.
-
-Trends can be included by specifying coordinate names (e.g., `~ lon + lat`).  Note that, although the data have a planar projection, the coordinate names are not changed from the original data set. We compute the empirical variogram for Fay's rainfall and save it by typing
+Trends can be included by specifying coordinate names (e.g., `~ lon + lat`).  Note that, although the data have a planar projection, the coordinate names are not changed from the original data set.
 ```{r}
 library(gstat)
-MW.v <- variogram(gust ~ Longitude + Latitude, data = MW.spdf)
+MW.v <- variogram(gust ~ Longitude + Latitude, 
+                  data = MW.spdf)
 ```
 
 To see the variogram values as a function of lag distance use the `plot` method on the variogram object. Or here you use the regular plot method and add text indicating the number of point pairs for each lag distance.
@@ -133,14 +154,13 @@ Here we interpolate first to locations (point kriging) on a regular grid and the
 ```{r}
 grid <- expand.grid(Longitude = seq(min(MW.df$Longitude), max(MW.df$Longitude), l = 61),
                     Latitude = seq(min(MW.df$Latitude), max(MW.df$Latitude), l = 61))
-head(grid)
 ```
 
 ```{r}
 grid.sp <- grid
-coordinates(grid.sp) <- ~ Longitude + Latitude
+gridded(grid.sp) <- ~ Longitude + Latitude
 proj4string(grid.sp) <- CRS(ll)
-grid.sp <- spTransform(grid.sp, CRS(aea))
+grid.sp <- spTransform(grid.sp, CRS(lcc))
 ```
 
 ```{r}
@@ -162,132 +182,20 @@ ipl <- krige(gust ~ Longitude + Latitude,
 
 If the variogram model is not included then inverse distance weighted interpolation is performed. The function will not work if different values share the same location. 
 
-The saved object (`ipl`) inherits the spatial pixels object specified in the `newdata` argument, but extends it to a spatial pixels data frame by adding a data slot. The data slot is a data frame with two variables.  The first `var1.pred` is the interpolated rainfall and the second `var1.var` is the prediction variance.
+```{r}
+tm_shape(ipl) +
+  tm_bubbles(size = "gust") +
+tm_shape(counties_sf) +
+  tm_borders() +
+tm_shape(grid.sp) +
+  tm_dots()
+```
+
+
+The saved object (`ipl`) inherits the spatial points object specified in the `newdata` argument, but extends it to a spatial data frame by adding a data slot. The data slot is a data frame with two variables.  The first `var1.pred` is the interpolated rainfall and the second `var1.var` is the prediction variance.
 
 We plot the interpolated field using the `spplot` method. We specify an inverted topographic color ramp to highlight in blue regions with the highest rain totals.
 ```{r}
 spplot(ipl, "var1.pred", 
-       col.regions = rev(topo.colors(20)), 
-       sp.layout = l3)
-```
-
-Note that a portion of the data values where outside of the state but your interest is only to have values on a grid within the state. The map shows that parts of east central and north Florida were deluged by Fay.
-
-We use block kriging to estimate rainfall amounts within each county. The county-wide rainfall average is relevant for water resource managers. Block kriging produces a smoothed estimate of this area average, which will differ from a simple average over all sites within the county because of spatial autocorrelation.
-
-We use the same function to interpolate but specify the spatial polygons rather than the spatial grid as the new data.
-```{r}
-ipl2 <- krige(tpm ~ 1, FR, 
-              newdata = FLpoly, 
-              model = FR.vm)
-spplot(ipl2, "var1.pred", 
        col.regions = rev(topo.colors(20)))
 ```
-
-The overall pattern of rainfall from Fay featuring the largest amounts along the central east coast and over the eastern panhandle are similar in both maps.
-
-We compute the average of county-wide rainfall again using the `over()` function by typing
-```{r}
-ipl3 <- over(x = FLpoly, y = FR, fn = mean)
-```
-
-The function returns a data frame of the average rainfall in each county.  The state-wide mean of the kriged estimates is 
-```{r}
-round(mean(ipl2$var1.pred), 2)
-```
-
-which compares with a state-wide mean using the arithmetic average.
-```{r}
-round(mean(ipl3$tpm), 2)
-```
-
-The correlation between the two estimates across the 67 counties is 
-```{r}
-round(cor(ipl3$tpm, ipl2$var1.pred), 2)
-```
-
-The variogram model reduces the standard deviation of the kriged estimate relative to the standard deviation of the simple averages because of the smoothing.
-```{r}
-round(sd(ipl2$var1.pred), 2)
-round(sd(ipl3$tpm), 2)
-```
-
-### Uncertainty
-
-One advantage of kriging as a method of spatial interpolation is the accompanying uncertainty estimates.  
-
-The prediction variances are listed in a column in the spatial data frame saved from apply the `krige()` function. Variances are smaller in regions with more rainfall observations.  
-
-Prediction variances are also smaller with block kriging as much of the variability within the county averages out. To compare the distribution characteristics of the prediction variances for the point and block kriging of the rainfall observations, type
-```{r}
-round(summary(ipl$var1.var), 1)
-round(summary(ipl2$var1.var), 1)
-```
-
-The median prediction variance (in cm$^2$) for our point kriging is 
-```{r}
-round(fivenum(ipl$var1.var)[3], 1)
-```
-
-which is close to the value of the nugget. In contrast the median prediction variance for our block kriging is a much smaller 
-```{r} 
-round(fivenum(ipl2$var1.var)[3], 1)
-```
-
-Simulations exploit this uncertainty and provide synthetic data for use in deterministic models. 
-
-Conditional simulation, where the simulated field (realization) is generated given the data and the variogram model, is done using the same `krige()` function by adding the argument `nsim` to specify the number of simulations.  
-
-For a large number it may be necessary to limit the number neighbors in the kriging. This is done using the `nmax` argument. For a given location, the weights assigned to observations far away are very small, so it is efficient to limit how many are used in the simulation.
-
-As an example, here we generate four realizations of the county level storm total rainfall for Fay and limit the neighborhood to 50 of the closest observation sites. Note that it may take a few minutes to finish processing this function.
-```{r}
-ipl.sim <- krige(tpm ~ 1, FR, 
-                 newdata = FLpoly, 
-                 model = FR.vm, 
-                 nsim = 4, 
-                 nmax = 50)
-```
-
-Simulations are conditional on the observed rainfall and the variogram model using block kriging on the counties.
-
-```{r}
-library(tmap)
-tm_shape(ipl.sim) +
-    tm_polygons(col = c("sim1", "sim2", "sim3", "sim4"),
-                palette = "Greens",
-                title = "Simulated Rainfall [cm]") +
-    tm_facets(free.scales = FALSE) 
-```
-
-Old code to make maps as small multiples: NOT RUN.
-```{r, eval=FALSE}
-mar <- 3000
-p1 <- spplot(ipl.sim, "sim1", col.regions=rev(topo.colors(20)), at=seq(0, 40, 5),
-  colorkey=list(space="bottom", labels=list(cex=.7)),
-  sub=list("Simulated rainfall [cm]", cex=.7, font=1),
-  xlim=c(FLpoly@bbox[1] - mar,
-  FLpoly@bbox[3] + mar), ylim=c(FLpoly@bbox[2] - mar, FLpoly@bbox[4] + mar))
-p2 <- spplot(ipl.sim, "sim2", col.regions=rev(topo.colors(20)), at=seq(0, 40, 5),
-  colorkey=list(space="bottom", labels=list(cex=.7)),
-  sub=list("Simulated rainfall [cm]", cex=.7, font=1),
-  xlim=c(FLpoly@bbox[1] - mar,
-  FLpoly@bbox[3] + mar), ylim=c(FLpoly@bbox[2] - mar, FLpoly@bbox[4] + mar))
-p3 <- spplot(ipl.sim, "sim3", col.regions=rev(topo.colors(20)), at=seq(0, 40, 5),
-  colorkey=list(space="bottom", labels=list(cex=.7)),
-  sub=list("Simulated rainfall [cm]", cex=.7, font=1),
-  xlim=c(FLpoly@bbox[1] - mar,
-  FLpoly@bbox[3] + mar), ylim=c(FLpoly@bbox[2] - mar, FLpoly@bbox[4] + mar))
-p4 <- spplot(ipl.sim, "sim4", col.regions=rev(topo.colors(20)), at=seq(0, 40, 5),
-  colorkey=list(space="bottom", labels=list(cex=.7)),
-  sub=list("Simulated rainfall [cm]", cex=.7, font=1),
-  xlim=c(FLpoly@bbox[1] - mar,
-  FLpoly@bbox[3] + mar), ylim=c(FLpoly@bbox[2] - mar, FLpoly@bbox[4] + mar))
-plot(p1, position=c(0, .5, .5, 1))
-plot(p2, position=c(.5, .5, 1, 1), newpage=FALSE)
-plot(p3, position=c(0, 0, .5, .5), newpage=FALSE)
-plot(p4, position=c(.5, 0, 1, .5), newpage=FALSE)
-```
-
-The overall pattern of rainfall remains the same, but there are differences especially in counties with relative few observations and where the rainfall gradients are steep.
-
