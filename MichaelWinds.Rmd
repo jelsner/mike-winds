@@ -19,24 +19,6 @@ dim(MW.df)
 ```
 
 The data frame contains 47 wind speed measurements (one duplicate location, removed). Longitude and latitude coordinates of the sites are given along with the peak wind gust (`PeakGustSpeed3`). Create a spatial points data frame by specifying columns that contain the spatial coordinates. Then assign a geographic coordinate system and convert the wind speed to meters per second.
-```{r}
-library(sf)
-library(dplyr)
-X <- MW.df %>%
-  select(Longitude, Latitude)
-
-MW.sf <- st_as_sf(x = X, 
-                  coords = c("Longitude", "Latitude"),
-                  crs = "+proj=longlat +datum=WGS84")
-plot(MW.sf)
-# interactive map:
-library(mapview)
-mapview(MW.sf)
-
-# convert to sp object if needed
-my.sp.point <- as(my.sf.point, "Spatial")
-
-```
 
 ```{r}
 library(sp)
