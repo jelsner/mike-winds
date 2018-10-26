@@ -60,12 +60,12 @@ tm_shape(FLALGA, is.master = TRUE) +
   tm_text(text = "name", xmod = c(0, 0, 2)) +
 tm_shape(Mitchell) +
   tm_polygons(col = "black") +
-  tm_text(text = "name", xmod = 1.5, col = "black", size = .75) +
+  tm_text(text = "name", xmod = 2.5, col = "black", size = .75) +
 tm_shape(Camilla) +
   tm_dots(col = "red", size = .1) +
 tm_scale_bar(position = c("left", "bottom")) +
 tm_compass(position = c("left", "bottom")) +
-tm_layout(bg.color="lightblue", inner.margins=c(.04, .03, .02, .01))
+tm_layout(bg.color="lightblue")
 
 
 tm_shape(MW.spdf) +
