@@ -40,10 +40,33 @@ ggplot(as.data.frame(MW.spdf), aes(gust)) +
 Map the data.
 ```{r}
 library(tmap)
-
+library(tmaptools)
+library(dplyr)
 library(albersusa)
-state_sf <- usa_sf("aeqd") 
-counties_sf <- counties_sf("aeqd")
+
+states <- usa_sf("aeqd")
+FLALGA <- states %>%
+  filter(iso_3166_2 %in% c("FL", "GA", "AL"))
+counties <- counties_sf("aeqd") %>%
+  filter(iso_3166_2 %in% c("FL", "GA", "AL"))
+Mitchell <- counties %>%
+  filter(iso_3166_2 == "GA", name == "Mitchell")
+Camilla <- geocode_OSM("Camilla, GA", as.sf = TRUE)
+
+tm_shape(states) +
+  tm_polygons() +
+tm_shape(FLALGA, is.master = TRUE) +
+  tm_polygons() +
+  tm_text(text = "name", xmod = c(0, 0, 2)) +
+tm_shape(Mitchell) +
+  tm_polygons(col = "black") +
+  tm_text(text = "name", xmod = 1.5, col = "black", size = .75) +
+tm_shape(Camilla) +
+  tm_dots(col = "red", size = .1) +
+tm_scale_bar(position = c("left", "bottom")) +
+tm_compass(position = c("left", "bottom")) +
+tm_layout(bg.color="lightblue", inner.margins=c(.04, .03, .02, .01))
+
 
 tm_shape(MW.spdf) +
   tm_bubbles("gust") +
