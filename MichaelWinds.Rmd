@@ -22,12 +22,15 @@ The data frame contains 47 wind speed measurements (one duplicate location, remo
 
 ```{r}
 library(sp)
+library(sf)
 MW.spdf <- MW.df
 coordinates(MW.spdf) <- ~ Longitude + Latitude
 ll <- "+proj=longlat +datum=NAD83"
 proj4string(MW.spdf) <- CRS(ll)
 MW.spdf$gust <- MW.spdf$PeakGustSpeed3 * .51444
+MW.spdf$maxw <- MW.spdf$MaxWindSpeed2 * .51444
 summary(MW.spdf$gust)
+summary(MW.spdf$maxw)
 ```
 
 Create a histogram.
@@ -37,7 +40,7 @@ ggplot(as.data.frame(MW.spdf), aes(gust)) +
   geom_histogram()
 ```
 
-Map the data.
+Map the location of Camilla, GA.
 ```{r}
 library(tmap)
 library(tmaptools)
@@ -60,13 +63,15 @@ tm_shape(FLALGA, is.master = TRUE) +
   tm_text(text = "name", xmod = c(0, 0, 2)) +
 tm_shape(Mitchell) +
   tm_polygons(col = "black") +
-  tm_text(text = "name", xmod = 2.5, col = "black", size = .75) +
+  tm_text(text = "name", ymod = -1, col = "black", size = .75) +
 tm_shape(Camilla) +
   tm_dots(col = "red", size = .1) +
 tm_scale_bar(position = c("left", "bottom")) +
 tm_compass(position = c("left", "bottom")) +
 tm_layout(bg.color="lightblue")
+```
 
+```{r}
 
 tm_shape(MW.spdf) +
   tm_bubbles("gust") +
@@ -79,8 +84,11 @@ tm_shape(counties_sf) +
 Next we create a character string specifying the tags for a planar projection and transform the geographic coordinates of the site locations and map polygons to the projected coordinates. Here we use Albers equal-area projection with true scale at latitudes 23 and 30$^\circ$ N and include a tag to specify meters as the unit of distance.
 ```{r}
 aea <- "+proj=aea +lat_1=23 +lat_2=30 +lat_0=26, +lon_0=-83 +units=m"
-lcc <- "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=39 +lon_0=-96 +x_0=0 +y_0=0 +datum=NAD83 +units=m"
-MW.spdf <- spTransform(MW.spdf, CRS(lcc))
+MW.spdf <- spTransform(MW.spdf, CRS(aea))
+MW.sf <- st_as_sf(MW.spdf)
+Window.sfc <- st_as_sfc(st_bbox(MW.sf))
+Window.sp <- as(W.sfc, "Spatial")
+Window.sp <- spTransform(Window.sp, CRS(aea))
 ```
 
 ### Empirical variogram
@@ -157,31 +165,17 @@ Interpolation is done using the `krige()` function. The first argument is the mo
 
 Here we interpolate first to locations (point kriging) on a regular grid and then to the county polygons (block kriging). To create a grid of locations within the boundary of Florida type
 ```{r}
-grid <- expand.grid(Longitude = seq(min(MW.df$Longitude), max(MW.df$Longitude), l = 61),
-                    Latitude = seq(min(MW.df$Latitude), max(MW.df$Latitude), l = 61))
+grid <- spsample(Window.sp, n = 50000, type = "regular")
+grid <- as(grid, "SpatialPixels")
+coordnames(grid) <- coordnames(MW.spdf)
 ```
 
-```{r}
-grid.sp <- grid
-gridded(grid.sp) <- ~ Longitude + Latitude
-proj4string(grid.sp) <- CRS(ll)
-grid.sp <- spTransform(grid.sp, CRS(lcc))
-```
-
-```{r}
-tm_shape(MW.spdf) +
-  tm_bubbles(size = "gust") +
-tm_shape(counties_sf) +
-  tm_borders() +
-tm_shape(grid.sp) +
-  tm_dots()
-```
 
 First we use the `krige()` function to interpolate  the observed rainfall to the grid locations.For a given location, the interpolation is a weighted average of the rainfall across the entire region where the weights are determined by the variogram model.
 ```{r}
 ipl <- krige(gust ~ Longitude + Latitude, 
              locations = MW.spdf, 
-             newdata = grid.sp, 
+             newdata = grid, 
              model = MW.vm)
 ```
 
@@ -189,11 +183,10 @@ If the variogram model is not included then inverse distance weighted interpolat
 
 ```{r}
 tm_shape(ipl) +
-  tm_bubbles(size = "gust") +
-tm_shape(counties_sf) +
-  tm_borders() +
-tm_shape(grid.sp) +
-  tm_dots()
+  tm_raster(col = "var1.pred",
+            title = "Peak Gust [m/s]", n = 5) +
+tm_shape(counties) +
+  tm_borders()
 ```
 
 
