@@ -184,7 +184,8 @@ We plot the interpoled field using `tm_raster()` layer.
 ```{r}
 tm_shape(gusts.spdf) +
   tm_raster(col = "var1.pred",
-            title = "Peak Gust [m/s]", n = 5) +
+            style = "cont",
+            title = "Peak Gust [m/s]") +
 tm_shape(counties) +
   tm_borders()
 ```
@@ -195,5 +196,6 @@ library(raster)
 gusts.r <- raster(gusts.spdf, layer = 1)
 gusts.re <- raster(gusts.spdf, layer = 2) #prediction variance
 extract(gusts.r, Camilla)
-extract(gusts.re, Camilla)
+sqrt(extract(gusts.re, Camilla))
 ```
+
