@@ -1,6 +1,6 @@
 ---
 title: "Hurricane Michael's Windfield"
-author: "James B. Elsner"
+author: "Zoe Schroder & James B. Elsner"
 date: October 25, 2018
 output: 
   html_document:
@@ -71,13 +71,13 @@ tm_compass(position = c("left", "bottom")) +
 tm_layout(bg.color="lightblue")
 ```
 
+Map the data.
 ```{r}
-
 tm_shape(MW.spdf) +
   tm_bubbles("gust") +
-tm_shape(state_sf) +
+tm_shape(states) +
   tm_borders() +
-tm_shape(counties_sf) +
+tm_shape(counties) +
   tm_borders(col = "grey")
 ```
 
@@ -87,13 +87,13 @@ aea <- "+proj=aea +lat_1=23 +lat_2=30 +lat_0=26, +lon_0=-83 +units=m"
 MW.spdf <- spTransform(MW.spdf, CRS(aea))
 MW.sf <- st_as_sf(MW.spdf)
 Window.sfc <- st_as_sfc(st_bbox(MW.sf))
-Window.sp <- as(W.sfc, "Spatial")
+Window.sp <- as(Window.sfc, "Spatial")
 Window.sp <- spTransform(Window.sp, CRS(aea))
 ```
 
 ### Empirical variogram
 
-Trends can be included by specifying coordinate names (e.g., `~ lon + lat`).  Note that, although the data have a planar projection, the coordinate names are not changed from the original data set.
+Trends can be included by specifying coordinate names (e.g., `~ lon + lat`).  Note that, although the data have a planar projection, the coordinate names are unchanged from the original data set.
 ```{r}
 library(gstat)
 MW.v <- variogram(gust ~ Longitude + Latitude, 
@@ -152,48 +152,48 @@ $$
 Check for anisotropy.
 ```{r}
 plot(variogram(gust ~ Longitude + Latitude, 
-               data = MW, 
+               data = MW.spdf, 
                alpha = c(0, 45, 90, 135)), 
      xlab = "Lag Distance (m)")
 ```
 
 ### Kriging
 
-The final step is to use the variogram model together with the rainfall values at the observation sites to create an interpolated surface.
-
 Interpolation is done using the `krige()` function. The first argument is the model specification and the second is the data.  Two other arguments are needed. One is the variogram model using the argument name model and the other is a set of locations identifying where the interpolations are to be made.  This is specified with the argument name `newdata`.
 
-Here we interpolate first to locations (point kriging) on a regular grid and then to the county polygons (block kriging). To create a grid of locations within the boundary of Florida type
+Create a grid then make them pixels.
 ```{r}
 grid <- spsample(Window.sp, n = 50000, type = "regular")
 grid <- as(grid, "SpatialPixels")
 coordnames(grid) <- coordnames(MW.spdf)
 ```
 
-
-First we use the `krige()` function to interpolate  the observed rainfall to the grid locations.For a given location, the interpolation is a weighted average of the rainfall across the entire region where the weights are determined by the variogram model.
+For a given location the interpolation is a weighted average of the rainfall across the entire region where the weights are determined by the variogram model.
 ```{r}
-ipl <- krige(gust ~ Longitude + Latitude, 
-             locations = MW.spdf, 
-             newdata = grid, 
-             model = MW.vm)
+gusts.spdf <- krige(gust ~ Longitude + Latitude, 
+                    locations = MW.spdf, 
+                    newdata = grid, 
+                    model = MW.vm)
 ```
 
-If the variogram model is not included then inverse distance weighted interpolation is performed. The function will not work if different values share the same location. 
+The saved object (`gusts.spdf`) inherits the spatial points object specified in the `newdata` argument, but extends it to a spatial data frame by adding a data slot. The data slot is a data frame with two variables. The first `var1.pred` is the interpolated rainfall and the second `var1.var` is the prediction variance.
 
+If the variogram model is not included then inverse distance weighted interpolation is performed. The function will return and error if a location has more than one value.
+
+We plot the interpoled field using `tm_raster()` layer.
 ```{r}
-tm_shape(ipl) +
+tm_shape(gusts.spdf) +
   tm_raster(col = "var1.pred",
             title = "Peak Gust [m/s]", n = 5) +
 tm_shape(counties) +
   tm_borders()
 ```
 
-
-The saved object (`ipl`) inherits the spatial points object specified in the `newdata` argument, but extends it to a spatial data frame by adding a data slot. The data slot is a data frame with two variables.  The first `var1.pred` is the interpolated rainfall and the second `var1.var` is the prediction variance.
-
-We plot the interpolated field using the `spplot` method. We specify an inverted topographic color ramp to highlight in blue regions with the highest rain totals.
+Get a prediction for the location of Camilla. First convert the pixels to a raster object.
 ```{r}
-spplot(ipl, "var1.pred", 
-       col.regions = rev(topo.colors(20)))
+library(raster)
+gusts.r <- raster(gusts.spdf, layer = 1)
+gusts.re <- raster(gusts.spdf, layer = 2) #prediction variance
+extract(gusts.r, Camilla)
+extract(gusts.re, Camilla)
 ```
